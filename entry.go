@@ -10,23 +10,21 @@ const (
 )
 
 // 任务模型
-type taskModel struct {
-	Id         int32     // 任务id
+type TaskModel struct {
+	Id         uint64    // 任务id
 	Version    int32     // 版本锁
 	CreateTime time.Time // 创建时间
 	UpdateTime time.Time // 更新时间
-	LastTime   time.Time // 上次执行时间
 	NextTime   time.Time // 下次执行时间
 	Status     int       // 任务执行状态
 }
 
-func (t *taskModel) toMap() map[string]interface{} {
+func (t *TaskModel) toMap() map[string]interface{} {
 	result := make(map[string]interface{})
 	result["id"] = t.Id
 	result["version"] = t.Version
 	result["createTime"] = t.CreateTime.String()
 	result["updateTime"] = t.UpdateTime.String()
-	result["lastTime"] = t.LastTime.String()
 	result["nextTime"] = t.NextTime.String()
 	return result
 }
