@@ -1,8 +1,10 @@
 package taskcron
 
 import (
+	"errors"
 	"fmt"
 	"github.com/go-redis/redis"
+	"sync"
 	"time"
 )
 
@@ -25,12 +27,14 @@ type TaskOptions struct {
 
 // 任务客户端
 type Task struct {
-	redis      *redis.Client // redis 客户端
-	prefix     string        // 标示任务的前缀
-	lockExpire uint32        // 锁
-	expire     uint32        // 任务执行完成之后过期的时间
-	idsKey     string        // 索引前缀
-	mapKey     string        // 存储待执行任务的key
+	redis      *redis.Client       // redis 客户端
+	prefix     string              // 标示任务的前缀
+	lockExpire uint32              // 锁
+	expire     uint32              // 任务执行完成之后过期的时间
+	idsKey     string              // 索引前缀
+	mapKey     string              // 存储待执行任务的key
+	timingMap  map[int]*time.Timer // 存储定时器的map
+	sync.RWMutex
 }
 
 // 创建任务
@@ -68,6 +72,50 @@ func (t *Task) Create(d time.Duration, f func()) (*TaskModel, error) {
 	// 将方法推送到定时任务中
 	time.AfterFunc(d, f)
 	return task, nil
+}
+
+// 执行任务
+func (t *Task) Do() (*TaskModel, error) {
+	return nil, nil
+}
+
+// 完成任务
+func (t *Task) Done() (*TaskModel, error) {
+	return nil, nil
+}
+
+// 取消任务
+func (t *Task) Cancel() error {
+	return nil
+}
+
+// 添加定时器
+func (t *Task) Set(k int, v *time.Timer) {
+	t.Lock()
+	t.timingMap[k] = v
+	defer t.Unlock()
+}
+
+// 获取定时器
+func (t *Task) Get(k int) *time.Timer {
+	return t.timingMap[k]
+}
+
+// 删除定时器
+func (t *Task) Delete(k int) {
+
+}
+
+// 停止定时器
+func (t *Task) Stop(k int) error {
+	timming := t.Get(k)
+	if timming != nil {
+		timming.Stop()
+
+		return nil
+	} else {
+		return TimmerNotFoundError
+	}
 }
 
 // 初始化任务客户端
