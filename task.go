@@ -1,7 +1,6 @@
 package taskcron
 
 import (
-	"errors"
 	"fmt"
 	"github.com/go-redis/redis"
 	"sync"
@@ -103,7 +102,9 @@ func (t *Task) Get(k int) *time.Timer {
 
 // 删除定时器
 func (t *Task) Delete(k int) {
-
+	t.Lock()
+	delete(t.timingMap, k)
+	defer t.Unlock()
 }
 
 // 停止定时器
@@ -111,7 +112,6 @@ func (t *Task) Stop(k int) error {
 	timming := t.Get(k)
 	if timming != nil {
 		timming.Stop()
-
 		return nil
 	} else {
 		return TimmerNotFoundError
