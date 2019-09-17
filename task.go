@@ -112,6 +112,7 @@ func (t *Task) Stop(k int) error {
 	timming := t.Get(k)
 	if timming != nil {
 		timming.Stop()
+		t.Delete(k)
 		return nil
 	} else {
 		return TimmerNotFoundError
