@@ -272,6 +272,7 @@ func Init(option RedisOptions, taskOptions TaskOptions) (*Task, error) {
 
 	// 初始化存储定时器的map集合
 	once.Do(func() {
+		fmt.Printf("检测是否启动了多次")
 		timmerMap = make(map[string]*time.Timer)
 	})
 
