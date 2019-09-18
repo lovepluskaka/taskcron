@@ -7,24 +7,35 @@ const (
 	Task_Status_Executing     = 2 // 执行中
 	Task_Status_Executed      = 3 // 已执行
 	Task_Status_Cancel        = 4 // 已取消
+	Task_Status_Fail          = 5 // 执行任务失败
+)
+
+const (
+	Task_Execute_Method_Get    = 1 // Get请求
+	Task_Execute_Method_Post   = 2 // Post请求
+	Task_Execute_Method_Put    = 3 // Put请求
+	Task_Execute_Method_Delete = 4 // Delete请求
 )
 
 // 任务模型
 type TaskModel struct {
 	Id         uint64    // 任务id
-	Version    int32     // 版本锁
 	CreateTime time.Time // 创建时间
 	UpdateTime time.Time // 更新时间
 	NextTime   time.Time // 下次执行时间
 	Status     int       // 任务执行状态
+	Method     int       // 任务的执行方法
+	Url        string    // 请求的url地址
 }
 
 func (t *TaskModel) toMap() map[string]interface{} {
 	result := make(map[string]interface{})
 	result["id"] = t.Id
-	result["version"] = t.Version
 	result["createTime"] = t.CreateTime.String()
 	result["updateTime"] = t.UpdateTime.String()
 	result["nextTime"] = t.NextTime.String()
+	result["status"] = t.Status
+	result["method"] = t.Method
+	result["url"] = t.Url
 	return result
 }

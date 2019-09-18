@@ -3,7 +3,7 @@ package taskcron
 import (
 	"fmt"
 	"github.com/go-redis/redis"
-	"sync"
+	"log"
 	"time"
 )
 
@@ -26,18 +26,16 @@ type TaskOptions struct {
 
 // 任务客户端
 type Task struct {
-	redis      *redis.Client       // redis 客户端
-	prefix     string              // 标示任务的前缀
-	lockExpire uint32              // 锁
-	expire     uint32              // 任务执行完成之后过期的时间
-	idsKey     string              // 索引前缀
-	mapKey     string              // 存储待执行任务的key
-	timingMap  map[int]*time.Timer // 存储定时器的map
-	sync.RWMutex
+	redis      *redis.Client // redis 客户端
+	prefix     string        // 标示任务的前缀
+	lockExpire uint32        // 锁的过期时间
+	expire     uint32        // 任务执行完成之后过期的时间
+	idsKey     string        // 索引前缀
+	mapKey     string        // 存储待执行任务的key
 }
 
 // 创建任务
-func (t *Task) Create(d time.Duration, f func()) (*TaskModel, error) {
+func (t *Task) Create(d time.Duration, url string, method int) (*TaskModel, error) {
 	id, err := t.redis.Incr(t.idsKey).Result()
 	if err != nil {
 		return nil, err
@@ -46,7 +44,6 @@ func (t *Task) Create(d time.Duration, f func()) (*TaskModel, error) {
 	now := time.Now()
 	task := &TaskModel{
 		Id:         uint64(id),
-		Version:    1,
 		CreateTime: now,
 		UpdateTime: now,
 		NextTime:   now.Add(d),
@@ -69,54 +66,45 @@ func (t *Task) Create(d time.Duration, f func()) (*TaskModel, error) {
 	tx.Exec()
 
 	// 将方法推送到定时任务中
-	time.AfterFunc(d, f)
+	time.AfterFunc(d, func() {
+		err := t.do(id)
+		if err != nil {
+			log.Fatalf("error is %s\n", err.Error())
+		}
+	})
 	return task, nil
 }
 
 // 执行任务
-func (t *Task) Do() (*TaskModel, error) {
-	return nil, nil
+func (t *Task) do(id int64) error {
+	lockKey := fmt.Sprintf("tasks:lock:%d", id)
+
+	// 执行任务前判断是否存在锁
+	success, err := t.redis.SetNX(lockKey, 1, time.Duration(t.lockExpire*1000*1000)).Result()
+	if err != nil {
+		log.Fatal("任务加锁失败：", lockKey)
+	}
+
+	// 若锁已存在/加锁失败，500ms后重试
+	if !success {
+		// 500ms后重试
+		time.Sleep(500 * 1000 * 1000)
+		return t.do(id)
+	} else {
+
+		return nil
+	}
 }
 
 // 完成任务
 func (t *Task) Done() (*TaskModel, error) {
+
 	return nil, nil
 }
 
 // 取消任务
 func (t *Task) Cancel() error {
 	return nil
-}
-
-// 添加定时器
-func (t *Task) Set(k int, v *time.Timer) {
-	t.Lock()
-	t.timingMap[k] = v
-	defer t.Unlock()
-}
-
-// 获取定时器
-func (t *Task) Get(k int) *time.Timer {
-	return t.timingMap[k]
-}
-
-// 删除定时器
-func (t *Task) Delete(k int) {
-	t.Lock()
-	delete(t.timingMap, k)
-	defer t.Unlock()
-}
-
-// 停止定时器
-func (t *Task) Stop(k int) error {
-	timming := t.Get(k)
-	if timming != nil {
-		timming.Stop()
-		t.Delete(k)
-		return nil
-	} else {
-		return TimmerNotFoundError
-	}
 }
 
 // 初始化任务客户端
@@ -136,8 +124,8 @@ func Init(option RedisOptions, taskOptions TaskOptions) (*Task, error) {
 	return &Task{
 		redis:      client,
 		prefix:     taskOptions.Prefix,
-		lockExpire: taskOptions.LockExpire,
-		expire:     taskOptions.Expire,
+		lockExpire: taskOptions.LockExpire | 500,   // 默认锁时间500毫秒
+		expire:     taskOptions.Expire | 3600*24*7, // 默认任务过期时间7天
 		idsKey:     idKey,
 		mapKey:     mapKey,
 	}, nil
