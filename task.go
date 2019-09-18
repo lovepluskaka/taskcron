@@ -4,8 +4,17 @@ import (
 	"fmt"
 	"github.com/go-redis/redis"
 	"log"
+	"sync"
 	"time"
 )
+
+// 保证用于创建定时器的map只创建了单例子
+var once sync.Once
+
+// 用于存储定时器的map
+var timmerMap map[string]*time.Timer
+
+var sy sync.Mutex
 
 // redis 相关的配置
 type RedisOptions *redis.Options
@@ -45,10 +54,12 @@ func (t *Task) Create(d time.Duration, url string, method int) (*TaskModel, erro
 		Url:        url,
 	}
 
+	taskKey := t.getTaskKey(id)
+
 	// 开启事务，创建
 	tx := t.redis.TxPipeline()
 
-	if err := tx.HMSet(t.getTaskKey(id), task.toMap()).Err(); err != nil {
+	if err := tx.HMSet(taskKey, task.toMap()).Err(); err != nil {
 		tx.Close()
 		return nil, err
 	}
@@ -59,14 +70,87 @@ func (t *Task) Create(d time.Duration, url string, method int) (*TaskModel, erro
 
 	tx.Exec()
 
+	sy.Lock()
+
 	// 将方法推送到定时任务中
-	time.AfterFunc(d, func() {
+	timmerMap[taskKey] = time.AfterFunc(d, func() {
 		err := t.do(id)
 		if err != nil {
 			log.Fatalf("error is %s\n", err.Error())
 		}
 	})
+	defer sy.Unlock()
+
 	return task, nil
+}
+
+// 取消任务
+func (t *Task) Cancel(id int64) error {
+	lockKey := t.GetLockKey(id)
+
+	// 执行任务前判断是否存在锁
+	success, err := t.redis.SetNX(lockKey, 1, time.Duration(t.lockExpire*1000*1000)).Result()
+	if err != nil {
+		log.Fatalf("任务加锁失败：", err)
+		return err
+	}
+
+	if !success {
+		return TaskHasExcuteError
+	} else {
+		// 执行取消操作
+		return t.cancel(id, lockKey)
+	}
+}
+
+// 取消
+func (t Task) cancel(id int64, lockKey string) error {
+	taskKey := t.getTaskKey(id)
+
+	// 开启事务
+	tx := t.redis.TxPipeline()
+
+	taskMap, err := tx.HGetAll(taskKey).Result()
+	if err != nil {
+		tx.Close()
+		return err
+	}
+
+	task := mapToStruct(taskMap)
+	// 若已执行，则不可取消
+	if task.Status != Task_Status_Not_Executing {
+		tx.Close()
+		return TaskHasExcuteError
+	}
+
+	data := make(map[string]interface{})
+
+	data["updateTime"] = time.Now().String()
+	data["status"] = Task_Status_Cancel
+
+	// 更新状态为取消
+	if err := tx.HMSet(taskKey, data).Err(); err != nil {
+		tx.Close()
+		return err
+	}
+
+	// 将任务从未执行的任务中移除
+	tx.SRem(t.mapKey, id)
+
+	// 删除悲观锁
+	tx.Del(t.GetLockKey(id))
+
+	tx.Exec()
+
+	// 从全局map中删除取消任务的定时器
+	timmer, exists := timmerMap[taskKey]
+	if exists {
+		timmer.Stop()
+	}
+
+	delete(timmerMap, taskKey)
+
+	return nil
 }
 
 // 执行任务
@@ -152,11 +236,13 @@ func (t *Task) done(id int64, key string, doneRes bool) error {
 
 	tx.Exec()
 
-	return nil
-}
+	sy.Lock()
 
-// 取消任务
-func (t *Task) Cancel() error {
+	// 从全局map中删除已经执行过任务的定时器
+	delete(timmerMap, key)
+
+	defer sy.Unlock()
+
 	return nil
 }
 
@@ -183,6 +269,11 @@ func Init(option RedisOptions, taskOptions TaskOptions) (*Task, error) {
 
 	// 存储待执行任务的key
 	mapKey := fmt.Sprintf("tasks:waiting:%s", taskOptions.Prefix)
+
+	// 初始化存储定时器的map集合
+	once.Do(func() {
+		timmerMap = make(map[string]*time.Timer)
+	})
 
 	return &Task{
 		redis:      client,
