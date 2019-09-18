@@ -2,4 +2,4 @@ package taskcron
 
 import "errors"
 
-var TimmerNotFoundError error = errors.New("找不到定时器")
+var TaskHasExcuteError error = errors.New("任务不是未执行的状态")

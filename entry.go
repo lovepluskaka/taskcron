@@ -1,6 +1,9 @@
 package taskcron
 
-import "time"
+import (
+	"strconv"
+	"time"
+)
 
 const (
 	Task_Status_Not_Executing = 1 // 未执行
@@ -37,5 +40,26 @@ func (t *TaskModel) toMap() map[string]interface{} {
 	result["status"] = t.Status
 	result["method"] = t.Method
 	result["url"] = t.Url
+	return result
+}
+
+func mapToStruct(m map[string]string) *TaskModel {
+	id, _ := strconv.ParseInt(m["id"], 10, 64)
+	ct, _ := time.Parse("2006-01-02 15:04:05 -0700 MST", m["createTime"])
+	ut, _ := time.Parse("2006-01-02 15:04:05 -0700 MST", m["updateTime"])
+	nt, _ := time.Parse("2006-01-02 15:04:05 -0700 MST", m["nextTime"])
+	status, _ := strconv.Atoi(m["status"])
+	method, _ := strconv.Atoi(m["method"])
+
+	result := &TaskModel{
+		Id:         uint64(id),
+		CreateTime: ct,
+		UpdateTime: ut,
+		NextTime:   nt,
+		Status:     status,
+		Method:     method,
+		Url:        m["url"],
+	}
+
 	return result
 }

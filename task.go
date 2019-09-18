@@ -17,13 +17,6 @@ type TaskOptions struct {
 	Expire     uint32 // 任务执行完成后在redis中存储的过期时间
 }
 
-// 返回结果
-//type Result struct {
-//	Id uint64 // 任务id
-//	Version int32 // 版本锁
-//	Status int // 任务状态
-//}
-
 // 任务客户端
 type Task struct {
 	redis      *redis.Client // redis 客户端
@@ -47,14 +40,15 @@ func (t *Task) Create(d time.Duration, url string, method int) (*TaskModel, erro
 		CreateTime: now,
 		UpdateTime: now,
 		NextTime:   now.Add(d),
+		Status:     Task_Status_Not_Executing,
+		Method:     method,
+		Url:        url,
 	}
-
-	taskKey := fmt.Sprintf("tasks:%s:%d", t.prefix, id)
 
 	// 开启事务，创建
 	tx := t.redis.TxPipeline()
 
-	if err := tx.HMSet(taskKey, task.toMap()).Err(); err != nil {
+	if err := tx.HMSet(t.getTaskKey(id), task.toMap()).Err(); err != nil {
 		tx.Close()
 		return nil, err
 	}
@@ -77,7 +71,7 @@ func (t *Task) Create(d time.Duration, url string, method int) (*TaskModel, erro
 
 // 执行任务
 func (t *Task) do(id int64) error {
-	lockKey := fmt.Sprintf("tasks:lock:%d", id)
+	lockKey := t.GetLockKey(id)
 
 	// 执行任务前判断是否存在锁
 	success, err := t.redis.SetNX(lockKey, 1, time.Duration(t.lockExpire*1000*1000)).Result()
@@ -85,26 +79,95 @@ func (t *Task) do(id int64) error {
 		log.Fatal("任务加锁失败：", lockKey)
 	}
 
-	// 若锁已存在/加锁失败，500ms后重试
+	// 若锁已存在/加锁失败，1000ms后重试
 	if !success {
 		// 500ms后重试
-		time.Sleep(500 * 1000 * 1000)
+		time.Sleep(1000 * 1000 * 1000)
 		return t.do(id)
 	} else {
-
-		return nil
+		return t.doing(id)
 	}
 }
 
-// 完成任务
-func (t *Task) Done() (*TaskModel, error) {
+// 任务正在执行
+func (t *Task) doing(id int64) error {
 
-	return nil, nil
+	taskKey := t.getTaskKey(id)
+
+	taskMap, err := t.redis.HGetAll(taskKey).Result()
+
+	if err != nil {
+		return err
+	}
+
+	task := mapToStruct(taskMap)
+
+	// 任务的状态必须是未执行
+	if task.Status != Task_Status_Not_Executing {
+		return TaskHasExcuteError
+	}
+
+	// 将任务状态改为执行中
+	if err := t.redis.HSet(taskKey, "status", Task_Status_Executing).Err(); err != nil {
+		return err
+	}
+
+	// 执行任务
+	executeRes := get(task.Url)
+
+	// 执行任务完成之后的操作
+	if err := t.done(id, taskKey, executeRes); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+// 定时任务执行完成之后的操作
+func (t *Task) done(id int64, key string, doneRes bool) error {
+
+	data := make(map[string]interface{})
+
+	data["updateTime"] = time.Now().String()
+	if doneRes {
+		data["status"] = Task_Status_Executed
+	} else {
+		data["status"] = Task_Status_Fail
+	}
+
+	// 开启事务，执行完成
+	tx := t.redis.TxPipeline()
+
+	// 更新任务状态
+	if err := tx.HMSet(key, data).Err(); err != nil {
+		tx.Close()
+		return err
+	}
+
+	// 将任务从未执行的任务中移除
+	tx.SRem(t.mapKey, id)
+
+	// 删除悲观锁
+	tx.Del(t.GetLockKey(id))
+
+	tx.Exec()
+
+	return nil
 }
 
 // 取消任务
 func (t *Task) Cancel() error {
 	return nil
+}
+
+// 获取任务key
+func (t *Task) getTaskKey(id int64) string {
+	return fmt.Sprintf("tasks:%s:%d", t.prefix, id)
+}
+
+// 获取锁的Key
+func (t *Task) GetLockKey(id int64) string {
+	return fmt.Sprintf("tasks:lock:%d", id)
 }
 
 // 初始化任务客户端
