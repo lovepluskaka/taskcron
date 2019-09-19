@@ -1,4 +1,4 @@
-package taskcron
+package task
 
 import (
 	"fmt"

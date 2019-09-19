@@ -1,0 +1,46 @@
+syntax = "proto3";
+package proto;
+
+import "google/protobuf/timestamp.proto";
+
+// 任务状态
+enum TaskStatus {
+    task_status_not_executing = 0; // 未执行
+    task_status_executing     = 1; // 执行中
+    task_status_executed      = 2; // 已执行
+    task_status_cancel        = 3; // 已取消
+    task_status_fail          = 4; // 执行任务失败
+}
+
+// http请求的类型
+enum TaskExecuteMethod {
+    grpc = 0; // grpc的方式
+    get = 1; // Get请求
+    post = 2; // Post请求
+    put = 3; // Put请求
+    delete = 4; // Delete请求
+}
+
+message Task {
+    uint64 id = 1;
+    google.protobuf.Timestamp createTime = 2;
+    google.protobuf.Timestamp updateTime = 3;
+    google.protobuf.Timestamp nextTime = 4;
+    TaskStatus status = 5;
+    TaskExecuteMethod method = 6;
+    string url = 7;
+}
+
+service TaskService {
+    rpc Create(CreateRequest) returns(CreateResponse) {}
+}
+
+message CreateRequest {
+   int64 duration = 1; // 任务的延时时间
+   string url = 2; // 请求的url地址
+   TaskExecuteMethod status = 3; // 创建任务请求的方法
+}
+
+message CreateResponse {
+    Task task = 1;
+}
