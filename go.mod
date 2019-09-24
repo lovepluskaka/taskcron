@@ -7,7 +7,6 @@ require (
 	github.com/golang/protobuf v1.2.0
 	github.com/onsi/ginkgo v1.10.1 // indirect
 	github.com/onsi/gomega v1.7.0 // indirect
-	golang.org/x/net v0.0.0-20190311183353-d8887717615a
 	google.golang.org/grpc v0.0.0-00010101000000-000000000000
 )
 
